@@ -1,101 +1,93 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <time.h>
-#include <iostream>
-#include <math.h>
 
+#include <stdio.h>
+#include <time.h>
+#include <unistd.h>
+
+#include "DIO.h"
 #include "MyRio.h"
 #include "I2C.h"
 #include "Motor_Controller.h"
 #include "Utils.h"
-#include "Ultrasonic.h"
+
 
 #include <sys/time.h>
 
-using namespace std;
+#include "Ultrasonic.h"
 
 extern NiFpga_Session myrio_session;
 
-void waitForMilli (int usecs);
 
 NiFpga_Status status;
 
-int dd;
 
 int main(int argc, char **argv)
 {
-  
+    NiFpga_Status status;
+
     Ultrasonic ultrasonic;
 
+    status = MyRio_Open();
+    if (MyRio_IsNotSuccess(status))
+    {
+        return status;
+    }
 
-	status = MyRio_Open();
-	if (MyRio_IsNotSuccess(status))
-	{
-		return status;
-	}
+    MyRio_I2c i2c;
+    status = Utils::setupI2CB(&myrio_session, &i2c);
 
-	MyRio_I2c i2c;
-	status = Utils::setupI2CB(&myrio_session, &i2c);
+    Motor_Controller mc = Motor_Controller(&i2c);
+    mc.controllerEnable(DC);
+    mc.controllerEnable(SERVO);
 
-	Motor_Controller mc = Motor_Controller(&i2c);
-	mc.controllerEnable(DC);
-	mc.controllerEnable(SERVO);
+    int volt = mc.readBatteryVoltage(1);
+    printf("%d\n\n", volt);
 
-	int volt = mc.readBatteryVoltage(1);
-	printf("%d\n\n", volt);
+    printf("Starting");
+    fflush(stdout);
 
-	int speed = 200;
-	int rigthCount = 0;
 
-	int loopTime = time(0) + 20; 
-	while(time(0) < loopTime){
-	
-		dd = ultrasonic.getDistance();
+    float leftDistance;
+    float rightDistance;
 
-		if(dd < 30)
-		{
+    float calib = 0.75;
 
-			printf("%d, Turning\n", dd);
-			fflush(stdout);
+    int speed = 25;
 
-			rigthCount = mc.readEncoderDegrees(DC, DC_1) + 465;
-			mc.setMotorDegrees(DC, speed, rigthCount, 0, 0);
+    while(1) {
+
+        leftDistance = ultrasonic.getDistance(Ultrasonic::FRONT_RIGHT);
+        //printDistance((char *)"Right distance = ", leftDistance);
+        rightDistance = ultrasonic.getDistance(Ultrasonic::FRONT_LEFT);
+        //printDistance((char *)"Left distance = ", rightDistance);
+
+        if(leftDistance >= 400 || leftDistance <= 2 || rightDistance >= 400 || rightDistance <= 2 ){
+        	
+			mc.setMotorSpeeds(DC, 0, 0);
+        	printf("One sensor is Out of range\n");
+
+        }else if(leftDistance - calib > rightDistance){
+
+        	printf("Turning right\n");
+			mc.setMotorSpeeds(DC, speed, speed);
+
+        }else  if(leftDistance < rightDistance - calib){
+
+        	printf("Turning left\n");
+			mc.setMotorSpeeds(DC, -speed, -speed);
+
+        }else{
 			
-			Utils::waitFor(3);
+			mc.setMotorSpeeds(DC, 0, 0);
+        	printf("Robot is perpendicular to the surface\n");
 
-		}else{
-			printf("%d, Forward\n", dd);
-
-			mc.setMotorSpeeds(DC, speed, -speed);
-			Utils::waitFor(1);
-			mc.setMotorSpeeds(DC, 0, -0);
+        }
 
 
-		}
-		fflush(stdout);
+        usleep(100000);
+    }
 
+    status = MyRio_Close();
 
-		//for(int i=100000000; i >0; i--);
-
-	}
-
-	mc.controllerReset(DC);
-	mc.controllerReset(SERVO);
-
-	status = MyRio_Close();
-
-	return status;
-
-
-	return 0;
-}
-
-void waitForMilli (int milli_seconds) {
-  
-    // Stroing start time 
-    clock_t start_time = clock(); 
-  
-    // looping till required time is not acheived 
-    while (clock() < start_time + milli_seconds);
-  
+    
+    return status;
 }
